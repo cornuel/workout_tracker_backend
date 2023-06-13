@@ -11,6 +11,9 @@ import logging
 from logging.handlers import RotatingFileHandler
 import re
 
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
+
 app = Flask(__name__)
 
 cors = CORS(app)
@@ -22,8 +25,6 @@ app.logger.addHandler(handler)
 
 # Set logging level for Flask app
 app.logger.setLevel(logging.DEBUG)
-
-app.config['DEBUG'] = True
 
 if __name__ == "__main__":
     app.run(debug=True)
@@ -41,6 +42,11 @@ class Workout(ObjectType):
     sets = Int()
     reps = Int()
     date = String()
+    
+class TotalReps(ObjectType):
+    workout_name = String()
+    total_reps = Int()
+    since_date = String()
 
     # def __init__(self, **kwargs):
     #     self._id = kwargs.get("_id", None)
@@ -93,12 +99,60 @@ class Mutation(ObjectType):
 ### Available Queries
 class Query(ObjectType):
     workouts = List(Workout)
+    total_reps_week = Field(TotalReps, workout_name=String(required=True))
+    total_reps_month = Field(TotalReps, workout_name=String(required=True))
+    total_reps_year = Field(TotalReps, workout_name=String(required=True))
+    total_reps_ever = Field(TotalReps, workout_name=String(required=True))
     
     def resolve_workouts(self, info):
         workouts = []
         for workout in collection.find():
             workouts.append(Workout(**workout))
         return workouts
+    
+    def resolve_total_reps_week(self, info, workout_name):
+        today = datetime.now().date()
+        start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+        end_date = datetime.now()
+        total_reps = 0
+        for workout in collection.find({"name": workout_name}):
+            workout_date = datetime.strptime(workout["date"], "%Y-%m-%d")
+            if start_date <= workout_date <= end_date:
+                # print(f"start_date: {start_date}")
+                # print(f"workout_date: {workout_date}")
+                # print(f"end_date: {end_date}")
+                total_reps += workout["sets"] * workout["reps"]
+        return TotalReps(workout_name=workout_name, total_reps=total_reps, since_date=start_date.strftime("%Y-%m-%d"))
+
+
+    def resolve_total_reps_month(self, info, workout_name):
+        start_date = datetime(datetime.now().year, datetime.now().month, 1)
+        end_date = datetime.now()
+        total_reps = 0
+        for workout in collection.find({"name": workout_name}):
+            workout_date = datetime.strptime(workout["date"], "%Y-%m-%d")
+            if start_date <= workout_date <= end_date:
+                # print(f"start_date: {start_date}")
+                # print(f"workout_date: {workout_date}")
+                # print(f"end_date: {end_date}")
+                total_reps += workout["sets"] * workout["reps"]
+        return TotalReps(workout_name=workout_name, total_reps=total_reps, since_date=start_date.strftime("%Y-%m-%d"))
+
+    def resolve_total_reps_year(self, info, workout_name):
+        start_date = datetime(datetime.now().year, 1, 1)
+        end_date = datetime.now()
+        total_reps = 0
+        for workout in collection.find({"name": workout_name}):
+            workout_date = datetime.strptime(workout["date"], "%Y-%m-%d")
+            if start_date <= workout_date <= end_date:
+                total_reps += workout["sets"] * workout["reps"]
+        return TotalReps(workout_name=workout_name, total_reps=total_reps, since_date=start_date.strftime("%Y-%m-%d"))
+
+    def resolve_total_reps_ever(self, info, workout_name):
+        total_reps = 0
+        for workout in collection.find({"name": workout_name}):
+            total_reps += workout["sets"] * workout["reps"]
+        return TotalReps(workout_name=workout_name, total_reps=total_reps, since_date=start_date.strftime("%Y-%m-%d"))
     
 ### Main entry point for the API
 schema = graphene.Schema(query=Query, mutation=Mutation)
