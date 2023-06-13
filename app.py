@@ -1,7 +1,10 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 from pymongo import MongoClient
 import graphene
 from graphene import ObjectType, String, Date, Int, Field, List
+from bson import ObjectId
+from graphene.types import Boolean
 from graphql import execute
 from decouple import config
 import logging
@@ -9,6 +12,8 @@ from logging.handlers import RotatingFileHandler
 import re
 
 app = Flask(__name__)
+
+cors = CORS(app)
 
 # Configure logging handler
 handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=1)
@@ -37,9 +42,9 @@ class Workout(ObjectType):
     reps = Int()
     date = String()
 
-    def __init__(self, **kwargs):
-        self._id = kwargs.get("_id", None)
-        super().__init__(**kwargs)
+    # def __init__(self, **kwargs):
+    #     self._id = kwargs.get("_id", None)
+    #     super().__init__(**kwargs)
     
 ### GraphQL Workout Mutation
 class CreateWorkout(graphene.Mutation):
@@ -68,9 +73,22 @@ class CreateWorkout(graphene.Mutation):
         workout = Workout(**workout_dict)
         return CreateWorkout(workout=workout)
     
+class DeleteWorkout(graphene.Mutation):
+    class Arguments:
+        workout_id = String(required=True)
+
+    success = Boolean()
+    
+    def mutate(self, info, workout_id):
+        result = collection.delete_one({"_id": ObjectId(workout_id)})
+        if result.deleted_count == 1:
+            return DeleteWorkout(success=True)
+        else:
+            return DeleteWorkout(success=False)
 ### Available Mutations
 class Mutation(ObjectType):
     create_workout = CreateWorkout.Field()
+    delete_workout = DeleteWorkout.Field()
     
 ### Available Queries
 class Query(ObjectType):
@@ -92,8 +110,8 @@ def graphql():
     query = data["query"]
     variables = data.get("variables", {})
     
-    app.logger.debug("Received query: %s", query)
-    app.logger.debug("Received variables: %s", variables)
+    # app.logger.debug("Received query: %s", query)
+    # app.logger.debug("Received variables: %s", variables)
     
     result = schema.execute(
         query,
@@ -105,3 +123,7 @@ def graphql():
     else:
         response = {"data": result.data}
     return jsonify(response)
+
+@app.route("/", methods=["GET"])
+def hello_world():
+    return "Hello World!"
