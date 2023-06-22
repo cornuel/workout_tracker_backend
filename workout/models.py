@@ -8,8 +8,11 @@ class Workout(ObjectType):
     reps = Int()
     date = String()
     done = Boolean()
+    user_id = String()
     
 class TotalReps(ObjectType):
     workout_name = String()
     total_reps = Int()
-    since_date = String()
+    date_gte = String()
+    date_lte = String()
+    user_id = String()

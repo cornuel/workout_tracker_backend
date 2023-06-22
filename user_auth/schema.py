@@ -11,7 +11,7 @@ from .models import User
 client = MongoClient(config('MONGO_URI'))
 
 db = client["workouttracker"]
-collection = db["workouts"]
+collection = db["users"]
 
 ### Available Queries
 class Query(ObjectType):
@@ -19,10 +19,9 @@ class Query(ObjectType):
 
     @jwt_required()
     def resolve_user(self, info):
-        print(f"resolve_user")
-        current_user = get_jwt_identity()
-        user = collection.find_one({"_id": ObjectId(current_user)})
+        # Gets current user with its jwt identity
+        user = collection.find_one({"username": get_jwt_identity()})
         return User(**user)
-    
+
 ### Main entry point for the API
 schema = graphene.Schema(query=Query)

@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify, Blueprint
 from flask_bcrypt import Bcrypt
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token
 from graphene.types import Boolean
 import graphene
@@ -22,6 +22,9 @@ collection = db["users"]
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
 
+# Enable CORS
+cors = CORS(app)
+
 class MergedQuery(workout_schema.query, user_auth_schema.query):
     pass
 
@@ -40,17 +43,17 @@ jwt = JWTManager(app)
 handler = RotatingFileHandler('app.log', maxBytes=10000, backupCount=1)
 handler.setLevel(logging.DEBUG)
 app.logger.addHandler(handler)
+app.debug = True  # Enable debug mode
 
 # Set logging level for Flask app
 app.logger.setLevel(logging.DEBUG)
 
-# Enable CORS
-cors = CORS(app)
 
 if __name__ == "__main__":
     app.run(debug=True)
 
 @app.route("/login", methods=["POST"])
+@cross_origin()
 def login():
     username = request.json.get("username", None)
     password = request.json.get("password", None)
@@ -63,7 +66,7 @@ def login():
     if not bcrypt.check_password_hash(user["password"], password):
         return jsonify({"msg": "Incorrect password"}), 401
     access_token = create_access_token(identity=username)
-    return jsonify(access_token=access_token)
+    return jsonify(access_token=access_token), 200
 
 @app.route("/signup", methods=["POST"])
 def signup():
@@ -88,7 +91,7 @@ def logout():
     return jsonify({"msg": "Logged out"})
 
 @app.route("/graphql", methods=["POST"])
-@jwt_required()
+# @jwt_required()
 def graphql():
     data = request.get_json()
 
