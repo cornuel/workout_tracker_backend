@@ -96,13 +96,9 @@ class Mutation(ObjectType):
 ### Available Queries
 class Query(ObjectType):
     workouts = List(Workout, user_id=String(required=True), date_gte=String(), date_lte=String())
-    total_reps_week = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True))
-    total_reps_month = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True))
-    total_reps_year = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True))
-    total_reps_ever = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True))
     total_reps = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True), date_gte=String(), date_lte=String())
-    
     total_reps_range = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True), time_range=String())
+    workout_name_list = List(String, user_id=String(required=True))
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
         query = {"user_id": ObjectId(user_id)}
@@ -117,6 +113,12 @@ class Query(ObjectType):
         for workout in collection.find(query):
             workouts.append(Workout(**workout))
         return workouts
+    
+    def resolve_workout_name_list(self, info, user_id):
+        query = {"user_id": ObjectId(user_id)}
+        workouts = db.workouts.find(query)
+        workout_names = set([workout['name'] for workout in workouts])
+        return list(workout_names)
     
     def resolve_total_reps(self, info, user_id, workout_name, date_gte=None, date_lte=None):
         total_reps = 0
