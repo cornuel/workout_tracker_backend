@@ -96,8 +96,8 @@ class Mutation(ObjectType):
 ### Available Queries
 class Query(ObjectType):
     workouts = List(Workout, user_id=String(required=True), date_gte=String(), date_lte=String())
-    total_reps = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True), date_gte=String(), date_lte=String())
-    total_reps_range = Field(TotalReps, user_id=String(required=True), workout_name=String(required=True), time_range=String())
+    one_workout_total_reps = Field(TotalReps, user_id=String(required=True), workout_name=String(), time_range=String())
+    all_workouts_total_reps = List(TotalReps, user_id=String(required=True), workout_name=String(), time_range=String())
     workout_name_list = List(String, user_id=String(required=True))
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
@@ -120,24 +120,11 @@ class Query(ObjectType):
         workout_names = set([workout['name'] for workout in workouts])
         return list(workout_names)
     
-    def resolve_total_reps(self, info, user_id, workout_name, date_gte=None, date_lte=None):
-        total_reps = 0
-        query = {"user_id": ObjectId(user_id), "name": workout_name}
-        if date_gte and date_lte:
-            query.update({"date": {"$gte": date_gte, "$lte": date_lte}})
-        elif date_gte:
-            query.update({"date": {"$gte": date_gte}})
-        elif date_lte:
-            query.update({"date": {"$lte": date_lte}})
-
-        for workout in collection.find(query):
-            total_reps += workout["sets"] * workout["reps"]
-
-        return TotalReps(workout_name=workout_name, total_reps=total_reps, date_gte=date_gte, date_lte=date_lte)
     
-    def resolve_total_reps_range(self, info, user_id, workout_name, time_range=None):
+    def resolve_one_workout_total_reps(self, info, user_id, workout_name, time_range=None):
         total_reps = 0
         query = {"user_id": ObjectId(user_id), "name": workout_name}
+        
         end_date = datetime.now()
 
         if time_range == "week":
@@ -155,13 +142,48 @@ class Query(ObjectType):
 
         for workout in collection.find(query):
             total_reps += workout["sets"] * workout["reps"]
-
         return TotalReps(
             workout_name=workout_name, 
             total_reps=total_reps, 
             user_id=user_id
-            )
+        )
+            
+    def resolve_all_workouts_total_reps(self, info, user_id, workout_name=None, time_range=None):
+        total_reps = 0
+        query = {"user_id": ObjectId(user_id)}
+        
+        end_date = datetime.now()
 
+        if time_range == "week":
+            today = datetime.now().date()
+            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "month":
+            start_date = datetime(datetime.now().year, datetime.now().month, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "year":
+            start_date = datetime(datetime.now().year, 1, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        else:
+            pass
+
+        workouts = collection.find(query)
+        workout_totals = {}
+
+        for workout in workouts:
+            # print(workout)
+            workout_name = workout["name"]
+            total_reps = workout["sets"] * workout["reps"]
+            if workout_name in workout_totals:
+                workout_totals[workout_name] += total_reps
+            else:
+                workout_totals[workout_name] = total_reps
+                
+        
+        print(workout_totals)
+
+        return [TotalReps(workout_name=workout_name, total_reps=total_reps, user_id=user_id) 
+                    for workout_name, total_reps in workout_totals.items()]
 
 
 ### Main entry point for the API

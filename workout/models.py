@@ -11,8 +11,8 @@ class Workout(ObjectType):
     user_id = String()
     
 class TotalReps(ObjectType):
-    workout_name = String()
-    total_reps = Int()
+    workout_name = String(default_value="")
+    total_reps = Int(default_value=0)
     date_gte = String()
     date_lte = String()
     user_id = String()
