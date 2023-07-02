@@ -1,47 +1,54 @@
 from pymongo import MongoClient
 from decouple import config
 from bson import ObjectId
-from graphene import ObjectType, String, Date, Int, Field, List, Boolean
+from graphene import ObjectType, String, Int, Field, List, Boolean
 import graphene
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-from .models import Workout, TotalReps
+from .models import Workout, TotalReps, WorkoutNameEnum
 
 # Configure MongoDBClient
 client = MongoClient(config('MONGO_URI'))
 
 db = client["workouttracker"]
-collection = db["workouts"]
+workouts_collection = db["workouts"]
+exercises_collection = db["exercises"]
 
 ### CreateWorkout Mutation
 class CreateWorkout(graphene.Mutation):
     class Arguments:
-        name = String(required=True)
+        exercise_id = String(required=True)
         sets = Int(required=True)
         reps = Int(required=True)
+        weight = Int()
         date = String(required=True)
         done = Boolean(required=True)
+        comment = String()
         user_id = String(required=True)
     
     workout = Field(lambda: Workout)
     
     ### Create Workout
-    def mutate(self, info, name, sets, reps, date, done, user_id):
+    def mutate(self, info, exercise_id, sets, reps, date, done, user_id, weight=None, comment=None):
+        exercise = exercises_collection.find_one({"_id": ObjectId(exercise_id)})
+        if not exercise:
+            raise ValueError(f"Exercise with ID '{exercise_id}' not found")
+        
         workout_dict = {
-            "name": name,
+            "exercise": exercise,
             "sets": sets,
             "reps": reps,
             "date": date,
             "done": done,
-            "user_id": ObjectId(user_id)
+            "user_id": ObjectId(user_id),
+            "weight": weight,
+            "comment": comment
         }
-        # app.logger.debug("mutate workout_dict: %s", workout_dict)
         
-        ### add mandatory mangodb _id field 
-        result = collection.insert_one(workout_dict)
+        result = workouts_collection.insert_one(workout_dict)
         workout_dict["_id"] = result.inserted_id
-        
+
         workout = Workout(**workout_dict)
         return CreateWorkout(workout=workout)
     
@@ -55,7 +62,7 @@ class DeleteWorkout(graphene.Mutation):
     success = Boolean()
     
     def mutate(self, info, workout_id, user_id):
-        result = collection.delete_one({"_id": ObjectId(workout_id), "user_id": ObjectId(user_id)})
+        result = workouts_collection.delete_one({"_id": ObjectId(workout_id), "user_id": ObjectId(user_id)})
         if result.deleted_count == 1:
             return DeleteWorkout(success=True)
         else:
@@ -66,20 +73,32 @@ class DeleteWorkout(graphene.Mutation):
 class UpdateWorkout(graphene.Mutation):
     class Arguments:
         workout_id = String(required=True)
-        name = String()
+        exercise_id = String()
         sets = Int()
         reps = Int()
+        weight = Int()
         date = String()
         done = Boolean()
+        comment = String()
         user_id = String(required=True)
         
     workout = Field(lambda: Workout)
     
-    def mutate(self, info, workout_id, user_id, **kwargs):
-        update = {"$set": kwargs}
-        result = collection.update_one({ "_id": ObjectId(workout_id), "user_id": ObjectId(user_id) }, update)
+    def mutate(self, info, workout_id, exercise_id, user_id, **kwargs):
+        
+        exercise = exercises_collection.find_one({"_id": ObjectId(exercise_id)})
+        if not exercise:
+            raise ValueError(f"Exercise with ID '{exercise_id}' not found")
+        
+        if "weight" not in kwargs:
+            kwargs["weight"] = None
+        
+        update = {"$set": {"exercise": exercise, **kwargs}}
+        
+        result = workouts_collection.update_one({ "_id": ObjectId(workout_id), "user_id": ObjectId(user_id) }, update)
+        
         if result.modified_count == 1:
-            workout_dict = collection.find_one({"_id": ObjectId(workout_id), "user_id": ObjectId(user_id)})
+            workout_dict = workouts_collection.find_one({"_id": ObjectId(workout_id), "user_id": ObjectId(user_id)})
             workout = Workout(**workout_dict)
             return UpdateWorkout(workout=workout)
         else:
@@ -95,10 +114,18 @@ class Mutation(ObjectType):
 
 ### Available Queries
 class Query(ObjectType):
-    workouts = List(Workout, user_id=String(required=True), date_gte=String(), date_lte=String())
-    one_workout_total_reps = Field(TotalReps, user_id=String(required=True), workout_name=String(), time_range=String())
-    all_workouts_total_reps = List(TotalReps, user_id=String(required=True), workout_name=String(), time_range=String())
-    workout_name_list = List(String, user_id=String(required=True))
+    workouts = List(Workout, 
+                    user_id=String(required=True), 
+                    date_gte=String(), 
+                    date_lte=String())
+    one_workout_total_reps = Field(TotalReps, 
+                                user_id=String(required=True), 
+                                workout_name=String(), 
+                                time_range=String())
+    all_workouts_total_reps = List(TotalReps, 
+                                user_id=String(required=True), 
+                                workout_name=String(), 
+                                time_range=String())
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
         query = {"user_id": ObjectId(user_id)}
@@ -110,16 +137,10 @@ class Query(ObjectType):
             query.update({"date": {"$lte": date_lte}})
             
         workouts = []
-        for workout in collection.find(query):
+        for workout in workouts_collection.find(query):
+            print(workout)
             workouts.append(Workout(**workout))
         return workouts
-    
-    def resolve_workout_name_list(self, info, user_id):
-        query = {"user_id": ObjectId(user_id)}
-        workouts = db.workouts.find(query)
-        workout_names = set([workout['name'] for workout in workouts])
-        return list(workout_names)
-    
     
     def resolve_one_workout_total_reps(self, info, user_id, workout_name, time_range=None):
         total_reps = 0
@@ -140,7 +161,7 @@ class Query(ObjectType):
         else:
             pass
 
-        for workout in collection.find(query):
+        for workout in workouts_collection.find(query):
             total_reps += workout["sets"] * workout["reps"]
         return TotalReps(
             workout_name=workout_name, 
@@ -167,7 +188,7 @@ class Query(ObjectType):
         else:
             pass
 
-        workouts = collection.find(query)
+        workouts = workouts_collection.find(query)
         workout_totals = {}
 
         for workout in workouts:

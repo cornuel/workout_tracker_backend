@@ -12,6 +12,7 @@ from logging.handlers import RotatingFileHandler
 
 from workout.schema import schema as workout_schema
 from user_auth.schema import schema as user_auth_schema
+from exercise.schema import schema as exercise_schema
 
 # Configure MongoDBClient
 client = MongoClient(config('MONGO_URI'))
@@ -25,7 +26,7 @@ bcrypt = Bcrypt(app)
 # Enable CORS
 cors = CORS(app)
 
-class MergedQuery(workout_schema.query, user_auth_schema.query):
+class MergedQuery(workout_schema.query, user_auth_schema.query, exercise_schema.query):
     pass
 
 class MergedMutation(workout_schema.mutation):

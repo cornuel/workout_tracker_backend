@@ -1,13 +1,18 @@
 from graphene import ObjectType, String, Int, Field, List, Boolean
 
+from workout.model_workoutNameEnum import WorkoutNameEnum
+from exercise.models import Exercise
+
 #### GraphQL Workout Object
 class Workout(ObjectType):
     _id = String()
-    name = String()
+    exercise = Field(Exercise)
     sets = Int()
     reps = Int()
+    weight = Int()
     date = String()
     done = Boolean()
+    comment = String()
     user_id = String()
     
 class TotalReps(ObjectType):
