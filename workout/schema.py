@@ -27,6 +27,7 @@ class CreateWorkout(graphene.Mutation):
         comment = String()
         user_id = String(required=True)
     
+    # output of the mutation
     workout = Field(lambda: Workout)
     
     ### Create Workout
@@ -59,6 +60,7 @@ class DeleteWorkout(graphene.Mutation):
         workout_id = String(required=True)
         user_id = String(required=True)
 
+    # output of the mutation
     success = Boolean()
     
     def mutate(self, info, workout_id, user_id):
@@ -82,6 +84,7 @@ class UpdateWorkout(graphene.Mutation):
         comment = String()
         user_id = String(required=True)
         
+    # output of the mutation
     workout = Field(lambda: Workout)
     
     def mutate(self, info, workout_id, exercise_id, user_id, **kwargs):
@@ -126,6 +129,8 @@ class Query(ObjectType):
                                 user_id=String(required=True), 
                                 workout_name=String(), 
                                 time_range=String())
+    workouts_left_today = List(Workout, user_id=String(required=True))
+    workouts_left_week = List(Workout, user_id=String(required=True))
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
         query = {"user_id": ObjectId(user_id)}
@@ -140,6 +145,29 @@ class Query(ObjectType):
         for workout in workouts_collection.find(query):
             print(workout)
             workouts.append(Workout(**workout))
+        return workouts
+    
+    def resolve_workouts_left_today(self, info, user_id):
+        today = datetime.now().strftime("%Y-%m-%d")
+        query = {"user_id": ObjectId(user_id), "date": today, "done": False}
+        workouts = []
+
+        for workout in workouts_collection.find(query):
+            workouts.append(Workout(**workout))
+
+        return workouts
+
+    def resolve_workouts_left_week(self, info, user_id):
+        today = datetime.now().date()
+        start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+        end_date = start_date + timedelta(days=6)
+
+        query = {"user_id": ObjectId(user_id), "date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}, "done": False}
+        workouts = []
+
+        for workout in workouts_collection.find(query):
+            workouts.append(Workout(**workout))
+
         return workouts
     
     def resolve_one_workout_total_reps(self, info, user_id, workout_name, time_range=None):
