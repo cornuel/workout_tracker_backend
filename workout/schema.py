@@ -6,7 +6,7 @@ import graphene
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-from .models import Workout, TotalReps, WorkoutNameEnum
+from .models import Workout, TotalReps, Exercise
 
 # Configure MongoDBClient
 client = MongoClient(config('MONGO_URI'))
@@ -131,6 +131,7 @@ class Query(ObjectType):
                                 time_range=String())
     workouts_left_today = List(Workout, user_id=String(required=True))
     workouts_left_week = List(Workout, user_id=String(required=True))
+    all_workouts_total_reps = List(TotalReps, user_id=String(required=True), time_range=String())
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
         query = {"user_id": ObjectId(user_id)}
@@ -197,10 +198,11 @@ class Query(ObjectType):
             user_id=user_id
         )
             
-    def resolve_all_workouts_total_reps(self, info, user_id, workout_name=None, time_range=None):
-        total_reps = 0
-        query = {"user_id": ObjectId(user_id)}
+    def resolve_all_workouts_total_reps(self, info, user_id, time_range=None):
+        workout_totals = {}
+        exercises_totals = []
         
+        query = {"user_id": ObjectId(user_id), "done": True}
         end_date = datetime.now()
 
         if time_range == "week":
@@ -216,23 +218,23 @@ class Query(ObjectType):
         else:
             pass
 
-        workouts = workouts_collection.find(query)
-        workout_totals = {}
-
-        for workout in workouts:
-            # print(workout)
-            workout_name = workout["name"]
+        for workout in workouts_collection.find(query):
+            exercise_name = workout["exercise"]["name"]
             total_reps = workout["sets"] * workout["reps"]
-            if workout_name in workout_totals:
-                workout_totals[workout_name] += total_reps
+            
+            if exercise_name in workout_totals:
+                workout_totals[exercise_name] += total_reps
             else:
-                workout_totals[workout_name] = total_reps
-                
-        
-        print(workout_totals)
+                workout_totals[exercise_name] = total_reps
+            
+            exercises_totals.append(
+                TotalReps(
+                    exercise=Exercise(**workout["exercise"]), 
+                    total_reps=total_reps)
+                )
 
-        return [TotalReps(workout_name=workout_name, total_reps=total_reps, user_id=user_id) 
-                    for workout_name, total_reps in workout_totals.items()]
+        return [exercise for exercise in exercises_totals ]
+
 
 
 ### Main entry point for the API
