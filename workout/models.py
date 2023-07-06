@@ -1,6 +1,5 @@
 from graphene import ObjectType, String, Int, Field, List, Boolean
 
-from workout.model_workoutNameEnum import WorkoutNameEnum
 from exercise.models import Exercise
 
 #### GraphQL Workout Object
