@@ -6,3 +6,8 @@ class Exercise(ObjectType):
     description = List(String)
     muscles = List(String)
     image = String()
+    
+class Poses(ObjectType):
+    _id = String()
+    name = String()
+    image = String()

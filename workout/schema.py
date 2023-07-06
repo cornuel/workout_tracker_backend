@@ -144,7 +144,6 @@ class Query(ObjectType):
             
         workouts = []
         for workout in workouts_collection.find(query):
-            print(workout)
             workouts.append(Workout(**workout))
         return workouts
     
