@@ -131,7 +131,6 @@ class Query(ObjectType):
                                 time_range=String())
     workouts_left_today = List(Workout, user_id=String(required=True))
     workouts_left_week = List(Workout, user_id=String(required=True))
-    all_workouts_total_reps = List(TotalReps, user_id=String(required=True), time_range=String())
     
     def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
         query = {"user_id": ObjectId(user_id)}
@@ -198,9 +197,8 @@ class Query(ObjectType):
         )
             
     def resolve_all_workouts_total_reps(self, info, user_id, time_range=None):
-        workout_totals = {}
         exercises_totals = []
-        
+
         query = {"user_id": ObjectId(user_id), "done": True}
         end_date = datetime.now()
 
@@ -220,19 +218,21 @@ class Query(ObjectType):
         for workout in workouts_collection.find(query):
             exercise_name = workout["exercise"]["name"]
             total_reps = workout["sets"] * workout["reps"]
-            
-            if exercise_name in workout_totals:
-                workout_totals[exercise_name] += total_reps
-            else:
-                workout_totals[exercise_name] = total_reps
-            
-            exercises_totals.append(
-                TotalReps(
-                    exercise=Exercise(**workout["exercise"]), 
-                    total_reps=total_reps)
-                )
 
-        return [exercise for exercise in exercises_totals ]
+            exercise = Exercise(**workout["exercise"])
+
+            existing_total_reps = next((total_reps_obj for total_reps_obj in exercises_totals if total_reps_obj.exercise.name == exercise_name), None)
+            
+            if existing_total_reps:
+                existing_total_reps.total_reps += total_reps
+            else:
+                total_reps_obj = TotalReps(exercise=exercise, total_reps=total_reps)
+                exercises_totals.append(total_reps_obj)
+
+        sorted_exercises_totals = sorted(exercises_totals, key=lambda x: x.exercise.name)
+
+        return sorted_exercises_totals
+
 
 
 
