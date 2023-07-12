@@ -22,6 +22,7 @@ class CreateWorkout(graphene.Mutation):
         sets = Int(required=True)
         reps = Int(required=True)
         weight = Int()
+        duration = Int()
         date = String(required=True)
         done = Boolean(required=True)
         comment = String()
@@ -31,7 +32,7 @@ class CreateWorkout(graphene.Mutation):
     workout = Field(lambda: Workout)
     
     ### Create Workout
-    def mutate(self, info, exercise_id, sets, reps, date, done, user_id, weight=None, comment=None):
+    def mutate(self, info, exercise_id, sets, reps, date, done, user_id, weight=None, duration=None, comment=None):
         exercise = exercises_collection.find_one({"_id": ObjectId(exercise_id)})
         if not exercise:
             raise ValueError(f"Exercise with ID '{exercise_id}' not found")
@@ -44,6 +45,7 @@ class CreateWorkout(graphene.Mutation):
             "done": done,
             "user_id": ObjectId(user_id),
             "weight": weight,
+            "duration": duration,
             "comment": comment
         }
         
@@ -79,6 +81,7 @@ class UpdateWorkout(graphene.Mutation):
         sets = Int()
         reps = Int()
         weight = Int()
+        duration = Int()
         date = String()
         done = Boolean()
         comment = String()
@@ -95,6 +98,9 @@ class UpdateWorkout(graphene.Mutation):
         
         if "weight" not in kwargs:
             kwargs["weight"] = None
+            
+        if "duration" not in kwargs:
+            kwargs["duration"] = None
         
         update = {"$set": {"exercise": exercise, **kwargs}}
         

@@ -9,6 +9,7 @@ class Workout(ObjectType):
     sets = Int()
     reps = Int()
     weight = Int()
+    duration = Int()
     date = String()
     done = Boolean()
     comment = String()
