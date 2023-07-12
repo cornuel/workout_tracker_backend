@@ -98,8 +98,8 @@ def signup():
     if user:
         return jsonify({"msg": "Username already exists"}), 409
     
-    email = collection.find_one({"email": email})
-    if email:
+    emailIsTaken = collection.find_one({"email": email})
+    if emailIsTaken:
         return jsonify({"msg": "Email already exists"}), 409
 
     collection.insert_one({"username": username, "password": password_hash, "email": email})
