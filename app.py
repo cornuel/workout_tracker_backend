@@ -20,6 +20,8 @@ client = MongoClient(config('MONGO_URI'))
 db = client["workouttracker"]
 collection = db["users"]
 
+db_user_workouts = client["user_workouts"]
+
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
 
@@ -77,7 +79,7 @@ def login():
     if not bcrypt.check_password_hash(user["password"], password):
         return jsonify({"msg": "Incorrect password"}), 401
     access_token = create_access_token(identity=username)
-    return jsonify(access_token=access_token), 200
+    return jsonify(access_token=access_token), 200 
 
 @app.route("/signup", methods=["POST"])
 def signup():
@@ -101,8 +103,15 @@ def signup():
     emailIsTaken = collection.find_one({"email": email})
     if emailIsTaken:
         return jsonify({"msg": "Email already exists"}), 409
-
+    
+    # Create a unique collection for the user based on their ID
     collection.insert_one({"username": username, "password": password_hash, "email": email})
+    
+    user = collection.find_one({"username": username})
+    user_id = f"user_{user['_id']}"
+    
+    db_user_workouts.create_collection(user_id)
+    
     return jsonify({"msg": "Account successfully created"}), 200
 
 

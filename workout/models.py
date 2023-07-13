@@ -18,5 +18,7 @@ class Workout(ObjectType):
 class TotalReps(ObjectType):
     exercise = Field(Exercise)
     total_reps = Int(default_value=0)
+    max_weight = Int(default_value=0)
+    max_duration = Int(default_value=0)
     date_gte = String()
     date_lte = String()
