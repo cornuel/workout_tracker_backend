@@ -6,7 +6,7 @@ import graphene
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
-from .models import Workout, TotalReps, Exercise
+from .models import Workout, TotalReps, Exercise, MaxDuration, MaxWeight
 
 # Configure MongoDBClient
 client = MongoClient(config('MONGO_URI'))
@@ -139,9 +139,18 @@ class Query(ObjectType):
     all_workouts_total_reps = List(TotalReps, 
                                 user_id=String(required=True), 
                                 time_range=String())
-    workout_max = List(TotalReps,
+    total_reps = List(TotalReps,
                             user_id=String(required=True),
-                            exercise_id=String())
+                            exercise_id=String(),
+                            time_range=String())
+    max_duration = List(MaxDuration,
+                            user_id=String(required=True),
+                            exercise_id=String(),
+                            time_range=String())
+    max_weight = List(MaxWeight,
+                            user_id=String(required=True),
+                            exercise_id=String(),
+                            time_range=String())
     workouts_left_today = List(Workout, user_id=String(required=True))
     workouts_left_week = List(Workout, user_id=String(required=True))
     
@@ -225,54 +234,56 @@ class Query(ObjectType):
 
         return sorted_exercises_totals
 
-    def resolve_workout_max(self, info, user_id, exercise_id=None):
+    def resolve_total_reps(self, info, user_id, exercise_id=None, time_range=None):
         maxList =[]
-        max_weight, max_duration, total_reps = 0, 0, 0
+        total_reps = 0
+        end_date = datetime.now()
+        query = {}
         
         user_collection = db_user_workouts[f"user_{user_id}"]
         
+        if time_range == "week":
+            today = datetime.now().date()
+            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "month":
+            start_date = datetime(datetime.now().year, datetime.now().month, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "year":
+            start_date = datetime(datetime.now().year, 1, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        else:
+            pass
+        
         # exercise_id provided
         if exercise_id:
-            print("ok")
-            workouts_query = {"exercise._id": ObjectId(exercise_id), 
-                            "done": True}
             exercise_query = {"_id": ObjectId(exercise_id)}
             
-            workouts = user_collection.find(workouts_query)
+            query.update({"exercise._id": ObjectId(exercise_id), 
+                        "done": True})
+            
+            workouts = user_collection.find(query)
             
             exercise = exercises_collection.find_one(exercise_query)
             
             for workout in workouts:
-                weight = workout["weight"]
-                duration = workout["duration"]
                 repetition = workout["sets"] * workout["reps"]
-                # print(weight, duration)
                 
                 total_reps += repetition
                 
-                if weight is not None and (weight > max_weight):
-                    max_weight = weight
-                    # print(max_weight)
-                    
-                if duration is not None and (duration > max_duration):
-                    max_duration = duration
-                    # print(max_duration)
-                    
-            
             maxList.append(TotalReps(exercise=exercise,
-                                    total_reps=total_reps,
-                                    max_weight=max_weight,
-                                    max_duration=max_duration))
+                                    total_reps=total_reps))
         
         # exercise_id not provided
         else:
-            workouts = user_collection.find({"done": True})
+            query.update({"done": True})
+            
+            workouts = user_collection.find(query)
             
             for workout in workouts:
+                
                 exercise_name = workout["exercise"]["name"]
                 total_reps = workout["sets"] * workout["reps"]
-                weight = workout["weight"]
-                duration = workout["duration"]
 
                 exercise = Exercise(**workout["exercise"])
 
@@ -281,17 +292,158 @@ class Query(ObjectType):
                 if existing_total_reps:
                     existing_total_reps.total_reps += total_reps
                     
-                    print(weight, existing_total_reps.max_weight)
-                    print(duration, existing_total_reps.max_duration)
 
-                    if weight is not None and (weight > existing_total_reps.max_weight):
-                        existing_total_reps.max_weight = weight
+                else:
+                    total_reps_obj = TotalReps(exercise=exercise, total_reps=total_reps)
+                    maxList.append(total_reps_obj)
+
+            maxList.reverse()
+            
+        return maxList
+    
+    def resolve_max_duration(self, info, user_id, exercise_id=None, time_range=None):
+        maxList =[]
+        max_duration = 0
+        end_date = datetime.now()
+        query = {}
+        
+        user_collection = db_user_workouts[f"user_{user_id}"]
+        
+        if time_range == "week":
+            today = datetime.now().date()
+            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "month":
+            start_date = datetime(datetime.now().year, datetime.now().month, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "year":
+            start_date = datetime(datetime.now().year, 1, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        else:
+            pass
+        
+        # exercise_id provided
+        if exercise_id:
+            exercise_query = {"_id": ObjectId(exercise_id)}
+            
+            query.update({"exercise._id": ObjectId(exercise_id), 
+                        "done": True})
+            
+            workouts = user_collection.find(query)
+            
+            exercise = exercises_collection.find_one(exercise_query)
+            
+            for workout in workouts:
+                duration = workout["duration"]
+                # print(weight, duration)
+                
+                if duration is not None and (duration > max_duration):
+                    max_duration = duration
+                    # print(max_duration)
+                    
+            
+            maxList.append(MaxDuration(exercise=exercise,
+                                    max_duration=max_duration))
+        
+        # exercise_id not provided
+        else:
+            query.update({"done": True})
+            
+            workouts = user_collection.find(query)
+            
+            for workout in workouts:
+                
+                exercise_name = workout["exercise"]["name"]
+                duration = workout["duration"]
+
+                exercise = Exercise(**workout["exercise"])
+
+                existing_total_reps = next((total_reps_obj for total_reps_obj in maxList if total_reps_obj.exercise.name == exercise_name), None)
+
+                if existing_total_reps:
+                    
+                    # print(duration, existing_total_reps.max_duration)
 
                     if duration is not None and (duration > existing_total_reps.max_duration):
                         existing_total_reps.max_duration = duration
                 else:
-                    total_reps_obj = TotalReps(exercise=exercise, total_reps=total_reps, max_weight=weight, max_duration=duration)
-                    maxList.append(total_reps_obj)
+                    if duration is not None:
+                        total_reps_obj = MaxDuration(exercise=exercise, max_duration=duration)
+                        maxList.append(total_reps_obj)
+
+            maxList.reverse()
+            
+        return maxList
+    
+    def resolve_max_weight(self, info, user_id, exercise_id=None, time_range=None):
+        maxList =[]
+        max_duration = 0
+        end_date = datetime.now()
+        query = {}
+        
+        user_collection = db_user_workouts[f"user_{user_id}"]
+        
+        if time_range == "week":
+            today = datetime.now().date()
+            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "month":
+            start_date = datetime(datetime.now().year, datetime.now().month, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        elif time_range == "year":
+            start_date = datetime(datetime.now().year, 1, 1)
+            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
+        else:
+            pass
+        
+        # exercise_id provided
+        if exercise_id:
+            exercise_query = {"_id": ObjectId(exercise_id)}
+            
+            query.update({"exercise._id": ObjectId(exercise_id), 
+                        "done": True})
+            
+            workouts = user_collection.find(query)
+            
+            exercise = exercises_collection.find_one(exercise_query)
+            
+            for workout in workouts:
+                weight = workout["weight"]
+                # print(weight, duration)
+                
+                if weight is not None and (weight > max_weight):
+                    max_weight = weight
+                    # print(max_duration)
+                    
+            
+            maxList.append(MaxWeight(exercise=exercise,
+                                    max_weight=max_weight))
+        
+        # exercise_id not provided
+        else:
+            query.update({"done": True})
+            
+            workouts = user_collection.find(query)
+            
+            for workout in workouts:
+                
+                exercise_name = workout["exercise"]["name"]
+                weight = workout["weight"]
+
+                exercise = Exercise(**workout["exercise"])
+
+                existing_total_reps = next((total_reps_obj for total_reps_obj in maxList if total_reps_obj.exercise.name == exercise_name), None)
+
+                if existing_total_reps:
+                    
+                    # print(duration, existing_total_reps.max_duration)
+
+                    if weight is not None and (weight > existing_total_reps.max_weight):
+                        existing_total_reps.max_duration = weight
+                else:
+                    if weight is not None:
+                        total_reps_obj = MaxWeight(exercise=exercise, max_weight=weight)
+                        maxList.append(total_reps_obj)
 
             maxList.reverse()
             
