@@ -5,6 +5,7 @@ from graphene import ObjectType, String, Int, Field, List, Boolean
 import graphene
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import bleach
 
 from .models import Workout, TotalReps, Exercise, MaxDuration, MaxWeight
 
@@ -34,6 +35,9 @@ class CreateWorkout(graphene.Mutation):
     
     ### Create Workout
     def mutate(self, info, exercise_id, sets, reps, date, done, user_id, weight=None, duration=None, comment=None):
+        # Sanitize the comment using bleach
+        sanitized_comment = bleach.clean(comment)
+        
         user_collection = db_user_workouts[f"user_{user_id}"]
         
         exercise = exercises_collection.find_one({"_id": ObjectId(exercise_id)})
@@ -49,7 +53,7 @@ class CreateWorkout(graphene.Mutation):
             "user_id": ObjectId(user_id),
             "weight": weight,
             "duration": duration,
-            "comment": comment
+            "comment": sanitized_comment
         }
         
         result = user_collection.insert_one(workout_dict)
@@ -97,24 +101,24 @@ class UpdateWorkout(graphene.Mutation):
     
     def mutate(self, info, workout_id, exercise_id, user_id, **kwargs):
         user_collection = db_user_workouts[f"user_{user_id}"]
-        
+
         exercise = exercises_collection.find_one({"_id": ObjectId(exercise_id)})
-        
+
         if not exercise:
             raise ValueError(f"Exercise with ID '{exercise_id}' not found")
-        
-        if "weight" not in kwargs:
-            kwargs["weight"] = None
-            
-        if "duration" not in kwargs:
-            kwargs["duration"] = None
-        
-        update = {"$set": {"exercise": exercise, **kwargs}}
-        
+
+        # Sanitize and validate the values in kwargs
+        sanitized_kwargs = {}
+        for key, value in kwargs.items():
+            sanitized_value = bleach.clean(value)
+            sanitized_kwargs[key] = sanitized_value
+
+        update = {"$set": {"exercise": exercise, **sanitized_kwargs}}
+
         result = user_collection.update_one({ "_id": ObjectId(workout_id)}, update)
-        
+
         print(result)
-        
+
         if result.modified_count == 1:
             workout_dict = user_collection.find_one({"_id": ObjectId(workout_id)})
             workout = Workout(**workout_dict)
@@ -197,43 +201,6 @@ class Query(ObjectType):
 
         return workouts
     
-    def resolve_all_workouts_total_reps(self, info, user_id, time_range=None):
-        exercises_totals = []
-
-        query = {"user_id": ObjectId(user_id), "done": True}
-        end_date = datetime.now()
-
-        if time_range == "week":
-            today = datetime.now().date()
-            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "month":
-            start_date = datetime(datetime.now().year, datetime.now().month, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "year":
-            start_date = datetime(datetime.now().year, 1, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        else:
-            pass
-
-        for workout in workouts_collection.find(query):
-            exercise_name = workout["exercise"]["name"]
-            total_reps = workout["sets"] * workout["reps"]
-
-            exercise = Exercise(**workout["exercise"])
-
-            existing_total_reps = next((total_reps_obj for total_reps_obj in exercises_totals if total_reps_obj.exercise.name == exercise_name), None)
-            
-            if existing_total_reps:
-                existing_total_reps.total_reps += total_reps
-            else:
-                total_reps_obj = TotalReps(exercise=exercise, total_reps=total_reps)
-                exercises_totals.append(total_reps_obj)
-
-        sorted_exercises_totals = sorted(exercises_totals, key=lambda x: x.exercise.name)
-
-        return sorted_exercises_totals
-
     def resolve_total_reps(self, info, user_id, exercise_id=None, time_range=None):
         maxList =[]
         total_reps = 0
@@ -448,7 +415,6 @@ class Query(ObjectType):
             maxList.reverse()
             
         return maxList
-
 
 
 ### Main entry point for the API
