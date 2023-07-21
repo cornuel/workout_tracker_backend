@@ -107,17 +107,17 @@ class UpdateWorkout(graphene.Mutation):
         if not exercise:
             raise ValueError(f"Exercise with ID '{exercise_id}' not found")
 
-        # Sanitize and validate the values in kwargs
         sanitized_kwargs = {}
         for key, value in kwargs.items():
-            sanitized_value = bleach.clean(value)
+            if key == 'comment':
+                sanitized_value = bleach.clean(value)
+            else:
+                sanitized_value = value
             sanitized_kwargs[key] = sanitized_value
 
         update = {"$set": {"exercise": exercise, **sanitized_kwargs}}
 
         result = user_collection.update_one({ "_id": ObjectId(workout_id)}, update)
-
-        print(result)
 
         if result.modified_count == 1:
             workout_dict = user_collection.find_one({"_id": ObjectId(workout_id)})
