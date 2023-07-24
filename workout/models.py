@@ -15,6 +15,10 @@ class Workout(ObjectType):
     comment = String()
     user_id = String()
     
+class WorkoutPagination(ObjectType):
+    workouts = List(Workout)
+    num_pages = Int()
+    
 class TotalReps(ObjectType):
     exercise = Field(Exercise)
     total_reps = Int(default_value=0)

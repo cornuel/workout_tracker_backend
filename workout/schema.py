@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import bleach
 
-from .models import Workout, TotalReps, Exercise, MaxDuration, MaxWeight
+from .models import Workout, WorkoutPagination, TotalReps, Exercise, MaxDuration, MaxWeight
 
 # Configure MongoDBClient
 client = MongoClient(config('MONGO_URI'))
@@ -136,10 +136,12 @@ class Mutation(ObjectType):
 
 ### Available Queries
 class Query(ObjectType):
-    workouts = List(Workout, 
+    workouts = Field(WorkoutPagination, 
                     user_id=String(required=True), 
                     date_gte=String(), 
-                    date_lte=String())
+                    date_lte=String(),
+                    page=Int(),
+                    exercise_id=String())
     all_workouts_total_reps = List(TotalReps, 
                                 user_id=String(required=True), 
                                 time_range=String())
@@ -158,21 +160,39 @@ class Query(ObjectType):
     workouts_left_today = List(Workout, user_id=String(required=True))
     workouts_left_week = List(Workout, user_id=String(required=True))
     
-    def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None):
+    def resolve_workouts(self, info, user_id, date_gte=None, date_lte=None, exercise_id=None, page=None):
         query = {}
         user_collection = db_user_workouts[f"user_{user_id}"]
-        
+
         if date_gte and date_lte:
             query.update({"date": {"$gte": date_gte, "$lte": date_lte}})
         elif date_gte:
             query.update({"date": {"$gte": date_gte}})
         elif date_lte:
             query.update({"date": {"$lte": date_lte}})
+
+        if exercise_id:
+            query.update({"exercise._id": ObjectId(exercise_id)})
+
+        
+        # Count number of pages
+        page_size = 12
+        total_workouts = user_collection.count_documents(query)
+        num_pages = (total_workouts // page_size) + (total_workouts % page_size > 0)
+
+        workouts_cursor = user_collection.find(query)
+        
+        if page:
+            skip = page_size * (page - 1)
+            workouts_cursor = workouts_cursor.sort("date", -1).skip(skip).limit(page_size)
+        else:
+            workouts_cursor = workouts_cursor.sort("date", -1)
+
+        workouts = [Workout(**workout) for workout in workouts_cursor]
             
-        workouts = []
-        for workout in user_collection.find(query):
-            workouts.append(Workout(**workout))
-        return workouts
+
+        return WorkoutPagination(workouts=workouts, num_pages=num_pages)
+
     
     def resolve_workouts_left_today(self, info, user_id):
         user_collection = db_user_workouts[f"user_{user_id}"]
