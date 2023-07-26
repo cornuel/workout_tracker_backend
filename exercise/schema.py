@@ -19,15 +19,22 @@ class Query(ObjectType):
     user_exercises = List(Exercise, user_id=String(required=True), muscles=List(String))
 
     def resolve_all_exercises(self, info, muscles=List(String)):
-        query = {}
+        pipeline = []
 
+        # Match stage based on muscles
         if muscles:
-            query["muscles"] = {"$in": muscles}
-        
-        exercises = []
-        for exercise in exercises_collection.find(query):
-            exercises.append(Exercise(**exercise))
-        return exercises
+            match_conditions = [{"muscles": muscle} for muscle in muscles]
+            # Match all muscles with an AND condition
+            pipeline.append({"$match": {"$and": match_conditions}})
+
+        pipeline.append({"$sort": {"name": 1}})
+
+        # Execute the aggregation pipeline
+        exercises = list(exercises_collection.aggregate(pipeline))
+
+        exercise_objects = [Exercise(**exercise) for exercise in exercises]
+
+        return exercise_objects
     
     def resolve_all_poses(self, info):
         poses = []
