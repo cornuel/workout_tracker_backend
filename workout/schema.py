@@ -3,9 +3,9 @@ from decouple import config
 from bson import ObjectId
 from graphene import ObjectType, String, Int, Field, List, Boolean
 import graphene
-from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import bleach
+from datetime import datetime, timedelta
 
 from .models import Workout, WorkoutPagination, TotalReps, Exercise, MaxDuration, MaxWeight
 
@@ -36,7 +36,10 @@ class CreateWorkout(graphene.Mutation):
     ### Create Workout
     def mutate(self, info, exercise_id, sets, reps, date, done, user_id, weight=None, duration=None, comment=None):
         # Sanitize the comment using bleach
-        sanitized_comment = bleach.clean(comment)
+        if comment is not None:
+            sanitized_comment = bleach.clean(comment)
+        else:
+            sanitized_comment = ''
         
         user_collection = db_user_workouts[f"user_{user_id}"]
         
@@ -222,219 +225,154 @@ class Query(ObjectType):
         return workouts
     
     def resolve_total_reps(self, info, user_id, exercise_id=None, time_range=None):
-        maxList =[]
-        total_reps = 0
-        end_date = datetime.now()
-        query = {}
+        """
+        Calculate and return the total number of repetitions for a user's workouts.
+
+        Parameters:
+            info (Info): The GraphQL information object.
+            user_id (int): The ID of the user.
+            exercise_id (str, optional): The ID of the exercise. Defaults to None.
+            time_range (str, optional): The time range for filtering workouts. Can be "week", "month", or "year". Defaults to None.
+
+        Returns:
+            List[TotalReps]: A list of TotalReps objects representing the total number of repetitions for each exercise.
+        """
+        pipeline = []
         
-        user_collection = db_user_workouts[f"user_{user_id}"]
-        
-        if time_range == "week":
+        # Match stage based on time_range
+        if time_range:
             today = datetime.now().date()
-            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "month":
-            start_date = datetime(datetime.now().year, datetime.now().month, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "year":
-            start_date = datetime(datetime.now().year, 1, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        else:
-            pass
-        
-        # exercise_id provided
+            start_dates = {
+                "week": today - timedelta(days=today.weekday()),
+                "month": datetime(today.year, today.month, 1).date(),
+                "year": datetime(today.year, 1, 1).date()
+            }
+
+            start_date = start_dates.get(time_range)
+            if start_date:
+                pipeline.append({"$match": {"date": {"$gte": start_date.strftime('%Y-%m-%d'), "$lte": today.strftime('%Y-%m-%d')}}})
+
+        # Match stage based on exercise_id
         if exercise_id:
-            exercise_query = {"_id": ObjectId(exercise_id)}
+            pipeline.append({"$match": {"exercise._id": ObjectId(exercise_id)}})
             
-            query.update({"exercise._id": ObjectId(exercise_id), 
-                        "done": True})
-            
-            workouts = user_collection.find(query)
-            
-            exercise = exercises_collection.find_one(exercise_query)
-            
-            for workout in workouts:
-                repetition = workout["sets"] * workout["reps"]
-                
-                total_reps += repetition
-                
-            maxList.append(TotalReps(exercise=exercise,
-                                    total_reps=total_reps))
+        # Match stage based on done
+        pipeline.append({"$match": {"done": True}})
+
+        # Group stage to calculate max duration for each exercise
+        pipeline.append({"$group": {"_id": "$exercise", "total_reps": {"$sum": {"$multiply": ["$sets", "$reps"]}}}})
         
-        # exercise_id not provided
-        else:
-            query.update({"done": True})
+        # Sort stage to order by max_duration
+        pipeline.append({"$sort": {"total_reps": -1}})
+        
+        result = db_user_workouts[f"user_{user_id}"].aggregate(pipeline)
+        
+        total_reps = []
+        for doc in result:
+            if doc["total_reps"]:
+                total_reps.append(TotalReps(exercise=doc["_id"], total_reps=doc["total_reps"]))
             
-            workouts = user_collection.find(query)
-            
-            for workout in workouts:
-                
-                exercise_name = workout["exercise"]["name"]
-                total_reps = workout["sets"] * workout["reps"]
+        return total_reps
 
-                exercise = Exercise(**workout["exercise"])
-
-                existing_total_reps = next((total_reps_obj for total_reps_obj in maxList if total_reps_obj.exercise.name == exercise_name), None)
-
-                if existing_total_reps:
-                    existing_total_reps.total_reps += total_reps
-                    
-
-                else:
-                    total_reps_obj = TotalReps(exercise=exercise, total_reps=total_reps)
-                    maxList.append(total_reps_obj)
-
-            maxList.reverse()
-            
-        return maxList
-    
     def resolve_max_duration(self, info, user_id, exercise_id=None, time_range=None):
-        maxList =[]
-        max_duration = 0
-        end_date = datetime.now()
-        query = {}
-        
-        user_collection = db_user_workouts[f"user_{user_id}"]
-        
-        if time_range == "week":
+        """
+        Retrieves the maximum duration for each exercise completed by a user within a specified time range and/or exercise ID.
+
+        Args:
+            info (object): The GraphQL info object.
+            user_id (str): The ID of the user.
+            exercise_id (str, optional): The ID of the exercise. Defaults to None.
+            time_range (str, optional): The time range for which to retrieve the maximum durations. Valid values are 'week', 'month', and 'year'. Defaults to None.
+
+        Returns:
+            List[MaxDuration]: A list of MaxDuration objects, each containing the exercise ID and the maximum duration achieved for that exercise.
+        """
+        pipeline = []
+
+        # Match stage based on time_range
+        if time_range:
             today = datetime.now().date()
-            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "month":
-            start_date = datetime(datetime.now().year, datetime.now().month, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "year":
-            start_date = datetime(datetime.now().year, 1, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        else:
-            pass
-        
-        # exercise_id provided
+            start_dates = {
+                "week": today - timedelta(days=today.weekday()),
+                "month": datetime(today.year, today.month, 1).date(),
+                "year": datetime(today.year, 1, 1).date()
+            }
+
+            start_date = start_dates.get(time_range)
+            if start_date:
+                pipeline.append({"$match": {"date": {"$gte": start_date.strftime('%Y-%m-%d'), "$lte": today.strftime('%Y-%m-%d')}}})
+
+        # Match stage based on exercise_id
         if exercise_id:
-            exercise_query = {"_id": ObjectId(exercise_id)}
+            pipeline.append({"$match": {"exercise._id": ObjectId(exercise_id)}})
             
-            query.update({"exercise._id": ObjectId(exercise_id), 
-                        "done": True})
-            
-            workouts = user_collection.find(query)
-            
-            exercise = exercises_collection.find_one(exercise_query)
-            
-            for workout in workouts:
-                duration = workout["duration"]
-                # print(weight, duration)
-                
-                if duration is not None and (duration > max_duration):
-                    max_duration = duration
-                    # print(max_duration)
-                    
-            
-            maxList.append(MaxDuration(exercise=exercise,
-                                    max_duration=max_duration))
+        # Match stage based on done
+        pipeline.append({"$match": {"done": True}})
+
+        # Group stage to calculate max duration for each exercise
+        pipeline.append({"$group": {"_id": "$exercise", "max_duration": {"$max": "$duration"}}})
         
-        # exercise_id not provided
-        else:
-            query.update({"done": True})
+        # Sort stage to order by max_duration
+        pipeline.append({"$sort": {"max_duration": -1}})
+        
+        result = db_user_workouts[f"user_{user_id}"].aggregate(pipeline)
+        
+        max_durations = []
+        for doc in result:
+            if doc["max_duration"]:
+                max_durations.append(MaxDuration(exercise=doc["_id"], max_duration=doc["max_duration"]))
             
-            workouts = user_collection.find(query)
-            
-            for workout in workouts:
-                
-                exercise_name = workout["exercise"]["name"]
-                duration = workout["duration"]
+        return max_durations
 
-                exercise = Exercise(**workout["exercise"])
-
-                existing_total_reps = next((total_reps_obj for total_reps_obj in maxList if total_reps_obj.exercise.name == exercise_name), None)
-
-                if existing_total_reps:
-                    
-                    # print(duration, existing_total_reps.max_duration)
-
-                    if duration is not None and (duration > existing_total_reps.max_duration):
-                        existing_total_reps.max_duration = duration
-                else:
-                    if duration is not None:
-                        total_reps_obj = MaxDuration(exercise=exercise, max_duration=duration)
-                        maxList.append(total_reps_obj)
-
-            maxList.reverse()
-            
-        return maxList
-    
     def resolve_max_weight(self, info, user_id, exercise_id=None, time_range=None):
-        maxList =[]
-        max_duration = 0
-        end_date = datetime.now()
-        query = {}
-        
-        user_collection = db_user_workouts[f"user_{user_id}"]
-        
-        if time_range == "week":
+        """
+        Retrieves the maximum weight for each exercise completed by a user within a specified time range and/or exercise ID.
+
+        Args:
+            info (object): The GraphQL info object.
+            user_id (str): The ID of the user.
+            exercise_id (str, optional): The ID of the exercise. Defaults to None.
+            time_range (str, optional): The time range for which to retrieve the maximum durations. Valid values are 'week', 'month', and 'year'. Defaults to None.
+
+        Returns:
+            List[MaxWeight]: A list of MaxWeight objects, each containing the exercise ID and the maximum weight achieved for that exercise.
+        """
+        pipeline = []
+
+        # Match stage based on time_range
+        if time_range:
             today = datetime.now().date()
-            start_date = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "month":
-            start_date = datetime(datetime.now().year, datetime.now().month, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        elif time_range == "year":
-            start_date = datetime(datetime.now().year, 1, 1)
-            query.update({"date": {"$gte": start_date.strftime("%Y-%m-%d"), "$lte": end_date.strftime("%Y-%m-%d")}})
-        else:
-            pass
-        
-        # exercise_id provided
+            start_dates = {
+                "week": today - timedelta(days=today.weekday()),
+                "month": datetime(today.year, today.month, 1).date(),
+                "year": datetime(today.year, 1, 1).date()
+            }
+
+            start_date = start_dates.get(time_range)
+            if start_date:
+                pipeline.append({"$match": {"date": {"$gte": start_date.strftime('%Y-%m-%d'), "$lte": today.strftime('%Y-%m-%d')}}})
+
+        # Match stage based on exercise_id
         if exercise_id:
-            exercise_query = {"_id": ObjectId(exercise_id)}
+            pipeline.append({"$match": {"exercise._id": ObjectId(exercise_id)}})
             
-            query.update({"exercise._id": ObjectId(exercise_id), 
-                        "done": True})
-            
-            workouts = user_collection.find(query)
-            
-            exercise = exercises_collection.find_one(exercise_query)
-            
-            for workout in workouts:
-                weight = workout["weight"]
-                # print(weight, duration)
-                
-                if weight is not None and (weight > max_weight):
-                    max_weight = weight
-                    # print(max_duration)
-                    
-            
-            maxList.append(MaxWeight(exercise=exercise,
-                                    max_weight=max_weight))
+        # Match stage based on done
+        pipeline.append({"$match": {"done": True}})
+
+        # Group stage to calculate max duration for each exercise
+        pipeline.append({"$group": {"_id": "$exercise", "max_weight": {"$max": "$weight"}}})
         
-        # exercise_id not provided
-        else:
-            query.update({"done": True})
+        # Sort stage to order by max_duration
+        pipeline.append({"$sort": {"max_weight": -1}})
+        
+        result = db_user_workouts[f"user_{user_id}"].aggregate(pipeline)
+        
+        max_weights = []
+        for doc in result:
+            if doc["max_weight"]:
+                max_weights.append(MaxWeight(exercise=doc["_id"], max_weight=doc["max_weight"]))
             
-            workouts = user_collection.find(query)
-            
-            for workout in workouts:
-                
-                exercise_name = workout["exercise"]["name"]
-                weight = workout["weight"]
-
-                exercise = Exercise(**workout["exercise"])
-
-                existing_total_reps = next((total_reps_obj for total_reps_obj in maxList if total_reps_obj.exercise.name == exercise_name), None)
-
-                if existing_total_reps:
-                    
-                    # print(duration, existing_total_reps.max_duration)
-
-                    if weight is not None and (weight > existing_total_reps.max_weight):
-                        existing_total_reps.max_duration = weight
-                else:
-                    if weight is not None:
-                        total_reps_obj = MaxWeight(exercise=exercise, max_weight=weight)
-                        maxList.append(total_reps_obj)
-
-            maxList.reverse()
-            
-        return maxList
+        return max_weights
 
 
 ### Main entry point for the API
